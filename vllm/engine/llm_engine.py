@@ -31,6 +31,9 @@ from vllm.usage.usage_lib import (UsageContext, is_usage_stats_enabled,
                                   usage_message)
 from vllm.utils import Counter
 
+from vllm.instrumentation import LayerLogger
+import torch
+
 logger = init_logger(__name__)
 _LOCAL_LOGGING_INTERVAL_SEC = 5
 
@@ -236,6 +239,11 @@ class LLMEngine:
                     self.get_tokenizer_for_seq,
                 ),
             ))
+        
+        self.current_device = torch.cuda.current_device()
+        self.layer_logger = LayerLogger(
+            f'/home/theoag/cse552/mixtral/batch_size_1024/output_process-{self.current_device}.csv'
+        )
 
     def _initialize_kv_caches(self) -> None:
         """Initialize the KV cache in the worker(s).
@@ -591,9 +599,14 @@ class LLMEngine:
         else:
             output = []
 
+        self.layer_logger.start_timer()
         request_outputs = self._process_model_outputs(
             output, scheduler_outputs.scheduled_seq_groups,
             scheduler_outputs.ignored_seq_groups, seq_group_metadata_list)
+        self.layer_logger.write(
+            f'output-process',
+            self.layer_logger.get_timer_value('ms')
+        )
 
         # Log stats.
         if self.log_stats:

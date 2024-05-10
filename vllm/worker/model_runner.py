@@ -26,6 +26,9 @@ from vllm.sequence import (MultiModalData, SamplerOutput, SequenceData,
 from vllm.utils import (CudaMemoryProfiler, is_hip, is_pin_memory_available,
                         make_tensor_with_pad)
 
+from vllm.instrumentation import LayerLogger
+from vllm.model_executor.models.mixtral import MixtralForCausalLM
+
 logger = init_logger(__name__)
 
 _PAD_SLOT_ID = -1
@@ -155,6 +158,10 @@ class ModelRunner:
         # The shape of the cached block table will be
         # (max batch size to capture, max context len to capture / block size).
         self.graph_block_tables: torch.Tensor  # Set after initial profiling.
+        self.current_device = torch.cuda.current_device()
+        self.layer_logger = LayerLogger(
+            f'/home/theoag/cse552/mixtral/batch_size_1024/model_runner_device-{self.current_device}.csv'
+        )
 
     def load_model(self) -> None:
         with CudaMemoryProfiler() as m:
@@ -717,6 +724,7 @@ class ModelRunner:
         seq_group_metadata_list: List[SequenceGroupMetadata],
         kv_caches: List[torch.Tensor],
     ) -> Optional[SamplerOutput]:
+        self.layer_logger.start_timer()
         (input_tokens, input_positions, attn_metadata, sampling_metadata,
          lora_requests, lora_mapping, multi_modal_input
          ) = self.prepare_input_tensors(seq_group_metadata_list)
@@ -754,7 +762,10 @@ class ModelRunner:
             logits=logits,
             sampling_metadata=sampling_metadata,
         )
-
+        self.layer_logger.write(
+            f'model_runner',
+            self.layer_logger.get_timer_value('ms')
+        )
         return output
 
     @torch.inference_mode()
@@ -1008,6 +1019,8 @@ class CUDAGraphRunner:
         # NOTE(woosuk): Python 3.8 does not support multi-line with statements.
         # https://stackoverflow.com/questions/31039022/python-multi-line-with-statement
         self._graph = torch.cuda.CUDAGraph()
+        if isinstance(self.model, MixtralForCausalLM):
+            kwargs['warmup'] = True
         with torch.cuda.graph(self._graph, pool=memory_pool):  # noqa: SIM117
             with _maybe_pynccl():
                 hidden_states = self.model(

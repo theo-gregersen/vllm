@@ -52,6 +52,7 @@ from vllm.model_executor.utils import set_weight_attrs
 from vllm.sequence import SamplerOutput
 from vllm.utils import print_warning_once
 
+from vllm.instrumentation import LayerLogger
 
 class MixtralMoE(nn.Module):
     """A tensor-parallel MoE implementation for Mixtral that shards each expert
@@ -282,6 +283,7 @@ class MixtralDecoderLayer(nn.Module):
     def __init__(
         self,
         config: MixtralConfig,
+        layer_id: int,
         quant_config: Optional[QuantizationConfig] = None,
     ) -> None:
         super().__init__()
@@ -306,6 +308,11 @@ class MixtralDecoderLayer(nn.Module):
                                        eps=config.rms_norm_eps)
         self.post_attention_layernorm = RMSNorm(config.hidden_size,
                                                 eps=config.rms_norm_eps)
+        self.current_device = torch.cuda.current_device()
+        self.layer_logger = LayerLogger(
+            f'/home/theoag/cse552/mixtral/batch_size_1024/mixtral_device-{self.current_device}.csv'
+        )
+        self.layer_id = layer_id
 
     def forward(
         self,
@@ -314,8 +321,11 @@ class MixtralDecoderLayer(nn.Module):
         kv_cache: torch.Tensor,
         attn_metadata: AttentionMetadata,
         residual: Optional[torch.Tensor],
+        warmup = False,
     ) -> torch.Tensor:
         # Self Attention
+        if not warmup:
+            self.layer_logger.start_timer()
         if residual is None:
             residual = hidden_states
             hidden_states = self.input_layernorm(hidden_states)
@@ -328,11 +338,23 @@ class MixtralDecoderLayer(nn.Module):
             kv_cache=kv_cache,
             attn_metadata=attn_metadata,
         )
+        if not warmup:
+            self.layer_logger.write(
+                f'attention_layer-{self.layer_id}',
+                self.layer_logger.get_timer_value('ms')
+            )
 
         # Fully Connected
+        if not warmup:
+            self.layer_logger.start_timer()
         hidden_states, residual = self.post_attention_layernorm(
             hidden_states, residual)
         hidden_states = self.block_sparse_moe(hidden_states)
+        if not warmup:
+            self.layer_logger.write(
+                f'expert_layer-{self.layer_id}',
+                self.layer_logger.get_timer_value('ms')
+            )
         return hidden_states, residual
 
 
@@ -357,8 +379,8 @@ class MixtralModel(nn.Module):
             org_num_embeddings=config.vocab_size,
         )
         self.layers = nn.ModuleList([
-            MixtralDecoderLayer(config, quant_config=quant_config)
-            for _ in range(config.num_hidden_layers)
+            MixtralDecoderLayer(config, layer_id, quant_config=quant_config)
+            for layer_id in range(config.num_hidden_layers)
         ])
         self.norm = RMSNorm(config.hidden_size, eps=config.rms_norm_eps)
 
@@ -368,6 +390,7 @@ class MixtralModel(nn.Module):
         positions: torch.Tensor,
         kv_caches: List[torch.Tensor],
         attn_metadata: AttentionMetadata,
+        warmup = False,
     ) -> torch.Tensor:
         hidden_states = self.embed_tokens(input_ids)
         residual = None
@@ -375,7 +398,8 @@ class MixtralModel(nn.Module):
             layer = self.layers[i]
             hidden_states, residual = layer(positions, hidden_states,
                                             kv_caches[i], attn_metadata,
-                                            residual)
+                                            residual,
+                                            warmup)
         hidden_states, _ = self.norm(hidden_states, residual)
         return hidden_states
 
@@ -437,9 +461,11 @@ class MixtralForCausalLM(nn.Module):
         positions: torch.Tensor,
         kv_caches: List[torch.Tensor],
         attn_metadata: AttentionMetadata,
+        warmup = False
     ) -> torch.Tensor:
         hidden_states = self.model(input_ids, positions, kv_caches,
-                                   attn_metadata)
+                                   attn_metadata,
+                                   warmup)
         return hidden_states
 
     def compute_logits(self, hidden_states: torch.Tensor,
