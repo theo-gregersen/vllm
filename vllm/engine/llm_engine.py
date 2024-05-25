@@ -21,6 +21,9 @@ from vllm.transformers_utils.tokenizer import (detokenize_incrementally,
                                                TokenizerGroup)
 from vllm.utils import Counter, set_cuda_visible_devices, get_ip, get_open_port, get_distributed_init_method
 
+from vllm.instrumentation import LayerLogger
+import torch
+
 if ray:
     from ray.util.scheduling_strategies import PlacementGroupSchedulingStrategy
 
@@ -122,6 +125,11 @@ class LLMEngine:
         self.num_prompt_tokens: List[Tuple[float, int]] = []
         # List of (timestamp, num_tokens)
         self.num_generation_tokens: List[Tuple[float, int]] = []
+
+        self.current_device = torch.cuda.current_device()
+        self.layer_logger = LayerLogger(
+            f'/home/theoag/cse552/mixtral_parallel/batch_size_256/output_process-{self.current_device}.csv'
+        )
 
     def get_tokenizer_for_seq(self, sequence: Sequence):
         return self.tokenizer.get_lora_tokenizer(sequence.lora_request)
@@ -709,6 +717,9 @@ class LLMEngine:
     def _process_model_outputs(
             self, output: SamplerOutput,
             scheduler_outputs: SchedulerOutputs) -> List[RequestOutput]:
+
+        self.layer_logger.start_timer()
+
         # Update the scheduled sequence groups with the model outputs.
         scheduled_seq_groups = scheduler_outputs.scheduled_seq_groups
         for seq_group, outputs in zip(scheduled_seq_groups, output):
@@ -736,6 +747,12 @@ class LLMEngine:
             # Log the system stats.
             self._log_system_stats(scheduler_outputs.prompt_run,
                                    scheduler_outputs.num_batched_tokens)
+
+        self.layer_logger.write(
+            f'output-process',
+            self.layer_logger.get_timer_value('ms')
+        )
+
         return request_outputs
 
     def step(self) -> List[RequestOutput]:

@@ -18,6 +18,9 @@ from vllm.lora.layers import LoRAMapping
 from vllm.lora.request import LoRARequest
 from vllm.utils import in_wsl
 
+from vllm.instrumentation import LayerLogger
+from vllm.model_executor.models.mixtral import MixtralForCausalLM
+
 logger = init_logger(__name__)
 
 KVCache = Tuple[torch.Tensor, torch.Tensor]
@@ -70,6 +73,11 @@ class ModelRunner:
         # cache in_wsl result
         self.in_wsl = in_wsl()
         self.kv_cache_dtype = kv_cache_dtype
+
+        self.current_device = torch.cuda.current_device()
+        self.layer_logger = LayerLogger(
+            f'/home/theoag/cse552/mixtral_parallel/batch_size_256/model_runner_device-{self.current_device}.csv'
+        )
 
     def load_model(self) -> None:
         self.model = get_model(self.model_config, self.lora_config)
@@ -519,6 +527,7 @@ class ModelRunner:
         seq_group_metadata_list: Optional[List[SequenceGroupMetadata]],
         kv_caches: List[Tuple[torch.Tensor, torch.Tensor]],
     ) -> Optional[SamplerOutput]:
+        self.layer_logger.start_timer()
         input_tokens, input_positions, input_metadata, sampling_metadata, lora_requests, lora_mapping = (
             self.prepare_input_tensors(seq_group_metadata_list))
 
@@ -543,6 +552,12 @@ class ModelRunner:
             hidden_states=hidden_states,
             sampling_metadata=sampling_metadata,
         )
+
+        self.layer_logger.write(
+            f'model_runner',
+            self.layer_logger.get_timer_value('ms')
+        )
+
         return output
 
     @torch.inference_mode()
@@ -728,12 +743,18 @@ class CUDAGraphRunner:
 
         # Capture the graph.
         self.graph = torch.cuda.CUDAGraph()
+        
+        kwargs = {}
+        if isinstance(self.model, MixtralForCausalLM):
+            kwargs['warmup'] = True
+        
         with torch.cuda.graph(self.graph, pool=memory_pool):
             hidden_states = self.model(
                 input_ids,
                 positions,
                 kv_caches,
                 input_metadata,
+                **kwargs
             )
         torch.cuda.synchronize()
 
