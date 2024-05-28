@@ -13,7 +13,8 @@ class LayerLogger:
         output_file,
         headers = None
     ) -> None:
-        self.output_file = output_file
+        self.folder = '/home/theoag/cse552/mixtral_parallel/batch_size_1'
+        self.output_file = f'{self.folder}/{output_file}'
         self.start_time = 0
         self.headers = headers
         if headers:

@@ -76,7 +76,7 @@ class ModelRunner:
 
         self.current_device = torch.cuda.current_device()
         self.layer_logger = LayerLogger(
-            f'/home/theoag/cse552/mixtral_parallel/batch_size_256/model_runner_device-{self.current_device}.csv'
+            f'model_runner_device-{self.current_device}.csv'
         )
 
     def load_model(self) -> None:

@@ -128,7 +128,7 @@ class LLMEngine:
 
         self.current_device = torch.cuda.current_device()
         self.layer_logger = LayerLogger(
-            f'/home/theoag/cse552/mixtral_parallel/batch_size_256/output_process-{self.current_device}.csv'
+            f'output_process-{self.current_device}.csv'
         )
 
     def get_tokenizer_for_seq(self, sequence: Sequence):

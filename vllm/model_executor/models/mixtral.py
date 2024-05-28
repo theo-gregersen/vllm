@@ -134,11 +134,12 @@ class MixtralMoE(nn.Module):
 
         self.current_device = torch.cuda.current_device()
         self.layer_logger = LayerLogger(
-            f'/home/theoag/cse552/mixtral_parallel/batch_size_256/mixtral_device-{self.current_device}.csv'
+            f'mixtral_device-{self.current_device}.csv'
         )
 
-    def forward(self, hidden_states: torch.Tensor, layer_id=None) -> torch.Tensor:
-        self.layer_logger.start_timer()
+    def forward(self, hidden_states: torch.Tensor, layer_id=None, warmup=False) -> torch.Tensor:
+        if not warmup:
+            self.layer_logger.start_timer()
 
         batch_size, sequence_length, hidden_dim = hidden_states.shape
         hidden_states = hidden_states.view(-1, hidden_dim)
@@ -151,14 +152,16 @@ class MixtralMoE(nn.Module):
                                                        dim=-1)
         routing_weights /= routing_weights.sum(dim=-1, keepdim=True)
 
-        self.layer_logger.write(
-            f'routing_layer-{layer_id}',
-            self.layer_logger.get_timer_value('ms')
-        )
+        if not warmup:
+            self.layer_logger.write(
+                f'routing_layer-{layer_id}',
+                self.layer_logger.get_timer_value('ms')
+            )
 
         final_hidden_states = None
         for expert_idx in self.expert_indicies:
-            self.layer_logger.start_timer()
+            if not warmup:
+                self.layer_logger.start_timer()
 
             expert_layer = self.experts[expert_idx]
             expert_mask = (selected_experts == expert_idx)
@@ -172,10 +175,11 @@ class MixtralMoE(nn.Module):
             else:
                 final_hidden_states.add_(current_hidden_states)
 
-            self.layer_logger.write(
-                f'expert-{expert_idx}_layer-{layer_id}',
-                self.layer_logger.get_timer_value('ms')
-            )
+            if not warmup:
+                self.layer_logger.write(
+                    f'expert-{expert_idx}_layer-{layer_id}',
+                    self.layer_logger.get_timer_value('ms')
+                )
 
         return tensor_model_parallel_all_reduce(final_hidden_states).view(
             batch_size, sequence_length, hidden_dim)
@@ -288,7 +292,7 @@ class MixtralDecoderLayer(nn.Module):
 
         self.current_device = torch.cuda.current_device()
         self.layer_logger = LayerLogger(
-            f'/home/theoag/cse552/mixtral_parallel/batch_size_256/mixtral_device-{self.current_device}.csv'
+            f'mixtral_device-{self.current_device}.csv'
         )
         self.layer_id = layer_id
 
@@ -330,7 +334,7 @@ class MixtralDecoderLayer(nn.Module):
 
         hidden_states, residual = self.post_attention_layernorm(
             hidden_states, residual)
-        hidden_states = self.block_sparse_moe(hidden_states, layer_id=self.layer_id)
+        hidden_states = self.block_sparse_moe(hidden_states, layer_id=self.layer_id, warmup=warmup)
 
         if not warmup:
             self.layer_logger.write(
