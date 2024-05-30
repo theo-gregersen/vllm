@@ -128,7 +128,8 @@ class LLMEngine:
 
         self.current_device = torch.cuda.current_device()
         self.layer_logger = LayerLogger(
-            f'output_process-{self.current_device}.csv'
+            f'output_process-{self.current_device}.csv',
+            ['latency']
         )
 
     def get_tokenizer_for_seq(self, sequence: Sequence):
@@ -749,7 +750,7 @@ class LLMEngine:
                                    scheduler_outputs.num_batched_tokens)
 
         self.layer_logger.write(
-            f'output-process',
+            # f'output-process',
             self.layer_logger.get_timer_value('ms')
         )
 

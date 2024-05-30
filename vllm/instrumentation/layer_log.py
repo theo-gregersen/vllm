@@ -1,5 +1,6 @@
 import time
 import torch
+import os
 
 class LayerLogger:
     """A logger for layer-specific logging in csv format.
@@ -13,7 +14,7 @@ class LayerLogger:
         output_file,
         headers = None
     ) -> None:
-        self.folder = '/home/theoag/cse552/mixtral_parallel/batch_size_1'
+        self.folder = os.environ.get('LAYER_LOG_PATH', '~')
         self.output_file = f'{self.folder}/{output_file}'
         self.start_time = 0
         self.headers = headers

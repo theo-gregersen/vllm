@@ -134,12 +134,13 @@ class MixtralMoE(nn.Module):
 
         self.current_device = torch.cuda.current_device()
         self.layer_logger = LayerLogger(
-            f'mixtral_device-{self.current_device}.csv'
+            f'experts_device-{self.current_device}.csv',
+            ['layer','expert','latency']
         )
 
     def forward(self, hidden_states: torch.Tensor, layer_id=None, warmup=False) -> torch.Tensor:
-        if not warmup:
-            self.layer_logger.start_timer()
+        # if not warmup:
+        #     self.layer_logger.start_timer()
 
         batch_size, sequence_length, hidden_dim = hidden_states.shape
         hidden_states = hidden_states.view(-1, hidden_dim)
@@ -152,11 +153,12 @@ class MixtralMoE(nn.Module):
                                                        dim=-1)
         routing_weights /= routing_weights.sum(dim=-1, keepdim=True)
 
-        if not warmup:
-            self.layer_logger.write(
-                f'routing_layer-{layer_id}',
-                self.layer_logger.get_timer_value('ms')
-            )
+        # if not warmup:
+        #     self.layer_logger.write(
+        #         'routing',
+        #         layer_id,
+        #         self.layer_logger.get_timer_value('ms')
+        #     )
 
         final_hidden_states = None
         for expert_idx in self.expert_indicies:
@@ -177,7 +179,8 @@ class MixtralMoE(nn.Module):
 
             if not warmup:
                 self.layer_logger.write(
-                    f'expert-{expert_idx}_layer-{layer_id}',
+                    layer_id,
+                    expert_idx,
                     self.layer_logger.get_timer_value('ms')
                 )
 
@@ -292,7 +295,8 @@ class MixtralDecoderLayer(nn.Module):
 
         self.current_device = torch.cuda.current_device()
         self.layer_logger = LayerLogger(
-            f'mixtral_device-{self.current_device}.csv'
+            f'mixtral_device-{self.current_device}.csv',
+            ['func','layer','latency']
         )
         self.layer_id = layer_id
 
@@ -324,7 +328,8 @@ class MixtralDecoderLayer(nn.Module):
 
         if not warmup:
             self.layer_logger.write(
-                f'attention_layer-{self.layer_id}',
+                'attention',
+                self.layer_id,
                 self.layer_logger.get_timer_value('ms')
             )
 
@@ -338,7 +343,8 @@ class MixtralDecoderLayer(nn.Module):
 
         if not warmup:
             self.layer_logger.write(
-                f'expert_layer-{self.layer_id}',
+                'experts',
+                self.layer_id,
                 self.layer_logger.get_timer_value('ms')
             )
 
