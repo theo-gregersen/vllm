@@ -77,7 +77,7 @@ class ModelRunner:
         self.current_device = torch.cuda.current_device()
         self.layer_logger = LayerLogger(
             f'model_runner_device-{self.current_device}.csv',
-            ['latency']
+            ['latency','shape']
         )
 
     def load_model(self) -> None:
@@ -556,7 +556,8 @@ class ModelRunner:
 
         self.layer_logger.write(
             # f'model_runner',
-            self.layer_logger.get_timer_value('ms')
+            self.layer_logger.get_timer_value('ms'),
+            input_tokens.shape[0]
         )
 
         return output
